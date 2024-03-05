@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="initial-scale=1, maximum-scale=1,user-scalable=no">
+  <title>Aplicación Prueba Final ArcGIS</title>
+
+  <!-- Enlaces a los estilos de ArcGIS API -->
+  <link rel="stylesheet" href="https://js.arcgis.com/3.45/dijit/themes/claro/claro.css">
+  <link rel="stylesheet" href="https://js.arcgis.com/3.45/esri/css/esri.css">
+
+  <!-- Estilos adicionales -->
+  <link rel="stylesheet" href="css/layout.css" />
+
+  <!-- Configuración de Dojo -->
+  <script>var dojoConfig = { parseOnLoad: true };</script>
+  <!-- Carga de la ArcGIS API -->
+  <script src="https://js.arcgis.com/3.45/"></script>
+
+  <style>
+    #search {
+      display: block;
+      position: absolute;
+      z-index: 2;
+      top: 10px;
+      right: 10px;
+    }
+  </style>
+  <script>
+
+    var map;
+    var tb;
+    require([
+      "esri/map",
+      "esri/layers/FeatureLayer",
+      "esri/layers/ArcGISDynamicMapServiceLayer",
+      "esri/symbols/SimpleFillSymbol",
+      "esri/Color",
+      "esri/dijit/PopupTemplate",
+      "esri/tasks/query",
+      "esri/dijit/Legend",
+      "esri/dijit/Search",
+      "esri/dijit/BasemapGallery",
+      "esri/dijit/OverviewMap",
+      "esri/dijit/Scalebar",
+      "esri/toolbars/draw", "esri/graphic",
+      "dojo/on",
+      "dojo/dom",
+      "dojo/dom-class", "dojo/dom-construct",
+      "dijit/TitlePane",
+      "dijit/layout/TabContainer",
+      "dijit/layout/ContentPane",
+      "dijit/layout/BorderContainer",
+      "dojo/domReady!"
+    ], function (
+      Map,
+      FeatureLayer,
+      ArcGISDynamicMapServiceLayer,
+      SimpleFillSymbol,
+      Color,
+      PopupTemplate,
+      Query,
+      Legend,
+      Search,
+      BasemapGallery,
+      OverviewMap,
+      Scalebar,
+      Draw, Graphic,
+      on,
+      dom
+    ) {
+
+      map = new Map("map", {
+        basemap: "topo",
+        center: [-95, 38], // Longitud, latitud (centro de EEUU)
+        zoom: 4,
+        sliderStyle: "small"
+      });
+
+      // Agregar capa de estados
+      var featureLayer = new FeatureLayer("http://sampleserver6.arcgisonline.com/arcgis/rest/services/USA/MapServer/2", {
+        outFields: ["*"],
+        infoTemplate: popupTemplate
+      });
+
+      // Crear popup 
+      var popupTemplate = new PopupTemplate({
+        "title": "{STATE_NAME}",
+        "fieldInfos": [
+          { "fieldName": "POP2000", "label": "Población", visible: true },
+          { "fieldName": "POP00_SQMI", "label": "Población por sqmi", visible: true },
+          { "fieldName": "ss6.gdb.States.area", "label": "Area", visible: true }
+        ]
+      });
+      featureLayer.infoTemplate = popupTemplate
+
+      //Añadir  MapServer con datos de EEUU
+      var lyrUSA = new ArcGISDynamicMapServiceLayer("http://sampleserver6.arcgisonline.com/arcgis/rest/services/USA/MapServer/");
+
+      //Añadir capas al mapa
+      map.addLayers([lyrUSA, featureLayer]);
+
+      // Crear widget de leyenda
+      var legend = new Legend({
+        map: map
+      }, "legendDiv");
+      legend.startup();
+
+    //Añadir widget búsqueda
+    var dijitSearch = new Search({
+      map : map,
+      autocomplete : true,
+    }, "divSearch");
+    dijitSearch.startup();
+
+    //Añadir widget Overview
+    var overviewMapDijit = new OverviewMap({
+      map: map,
+      visible: true
+    });
+    overviewMapDijit.startup();
+
+    //Añadir widget galería de mapas base
+      var gallery = new BasemapGallery({
+        showArcGISBasemaps: true,
+        map:map,
+      }, "BGallery");
+      gallery.startup();
+  
+    //Añadir escala
+    var scalebar = new Scalebar({
+        map: map,
+        scalebarUnit: "metric"
+    });
+
+      // Evento click para seleccionar estado en el mapa
+      on(dom.byId("progButtonNode"), "click", function () {
+        var stateName = dom.byId("dtb").value;
+        queryState(stateName);
+      });
+
+      // Función para seleccionar estado en el mapa
+      function queryState(stateName) {
+        var query = new Query();
+        query.where = "STATE_NAME = '" + stateName + "'";
+        featureLayer.selectFeatures(query, FeatureLayer.SELECTION_NEW);
+        featureLayer.show();
+      }
+
+      // Evento click para activar herramienta de dibujo
+      on(dom.byId("pintaYQuery"), "click", function () {
+        activateDrawingTool();
+      });
+
+      // Función para activar herramienta de dibujo
+      function activateDrawingTool() {
+        require(["esri/toolbars/draw", "esri/graphic"], function (Draw, Graphic) {
+          var toolbar = new Draw(map);
+          toolbar.activate(Draw.POLYGON);
+          map.graphics.clear();
+          toolbar.on("draw-end", function (evt) {
+            toolbar.deactivate();
+            var symbol = new SimpleFillSymbol().setColor(new Color([255, 0, 0, 0.5]));
+            var graphic = new Graphic(evt.geometry, symbol);
+            map.graphics.add(graphic);
+            queryCitiesWithinExtent(evt.geometry);
+          });
+        });
+      }
+
+      map.on('load', initToolbar);
+
+      let toolbar = new Draw(map);
+
+      function initToolbar(){
+        toolbar.on('draw-end', addGraphic);
+        toolbar.activate(Draw.POLYGON);
+      }
+
+      function addGraphic(event){
+        toolbar.deactivate();
+        map.enableMapNavigation();
+
+        let polygonSymbol = new SimpleFillSymbol();
+        let graphic = new Graphic(event.geometry, polygonSymbol);
+
+        map.graphics.add(graphic);
+
+        ResaltarCiudades(event.geometry);
+      }
+
+      function highlightSymbol(geometry){
+        let query = new Query();
+        query.geometry = geometry;
+
+        // La capa de ciudades tiene el identificador 2 en el MapServer
+        let citiesLayer = new FeatureLayer("http://sampleserver6.arcgisonline.com/arcgis/rest/services/USA/MapServer/2");
+
+        citiesLayer.queryFeatures(query, function(featureSet){
+          let features = featureSet.features;
+
+          let highlightSymbol = new SimpleMarkerSymbol(
+            SimpleMarkerSymbol.STYLE_CIRCLE, // Estilo del símbolo
+            12, // Tamaño del símbolo
+            new SimpleLineSymbol(
+              SimpleLineSymbol.STYLE_SOLID, // Estilo de línea
+              new Color([255, 0, 0]), // Color de línea (rojo)
+              3 // Ancho de línea
+            ),
+            new Color([255, 0, 0, 0.5]) // Color de relleno (rojo con transparencia)
+          );
+
+          // Resaltar cada entidad de la capa de ciudades dentro de la selección
+          features.forEach(function(feature){
+            let highlightGraphic = new Graphic(feature.geometry, highlightSymbol);
+            map.graphics.add(highlightGraphic);
+          });
+        });
+      }
+
+    });
+
+
+  </script>
+
+</head>
+
+<body class="claro">
+  <div id="mainWindow" data-dojo-type="dijit.layout.BorderContainer" data-dojo-props="design:'headline', gutters:false"
+    style="width:100%; height:100%;">
+
+    <div id="header" data-dojo-type="dijit.layout.ContentPane" data-dojo-props="region:'top'">
+      Master GIS ESRI España
+      <div id="subheader">Laura García Campo</div>
+
+    </div>
+    <div data-dojo-type="dijit.layout.ContentPane" id="leftPane" data-dojo-props="region:'left'">
+      <div data-dojo-type="dijit.layout.TabContainer">
+
+        <div data-dojo-type="dijit.layout.ContentPane" data-dojo-props="title:'Leyenda', selected:true">
+          <div id="legendDiv"></div>
+        </div>
+
+        <div data-dojo-type="dijit.layout.ContentPane" data-dojo-props="title:'Tareas'">
+          Operaciones
+          <button id="pintaYQuery" type="button">Seleccionar ciudades</button>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="map" data-dojo-type="dijit.layout.ContentPane" data-dojo-props="region:'center'">
+        <div id="divSearch"></div>
+        <div>
+          <div data-dojo-type="dijit/TitlePane"
+               data-dojo-props="title:'Switch Basemap', open:false">
+            <div data-dojo-type="dijit/layout/ContentPane">
+              <div id="BGallery"></div>
+            </div>
+          </div>
+        </div>
+    </div>
+
+    <div id="footer" data-dojo-type="dijit.layout.ContentPane" data-dojo-props="region:'bottom'">
+
+      <label for="dtb">Introduzca el nombre de un estado:</label> <input id="dtb" data-dojo-type="dijit/form/TextBox"
+        value="Washington" />
+      <button id="progButtonNode" type="button">Ir al estado</button>
+    </div>
+
+  </div>
+</body>
+
+</html>
